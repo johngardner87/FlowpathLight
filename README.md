@@ -3,7 +3,6 @@
 This data set and code is associated with Gardner et al. 2019 in press Limnology and Oceanography.
 
 1_clean - this file cleans and analyzes drifter data.
-2_fixedsite - 
 
 In the data folder there are raw and cleaned drifter datasets from the Upper Mississippi River (UMR) in Wisconsin and Neuse River (NR) in North Carolina.
 
