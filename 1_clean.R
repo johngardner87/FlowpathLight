@@ -1,7 +1,5 @@
 
-# Clean up
 
-####
 library(ggplot2)
 library(lattice)
 library(reshape2)
@@ -28,9 +26,11 @@ library(broom)
 library(padr)
 library(roll)
 library(viridis)
+library(fitdistrplus)
+library(data.table)
 
 #######################################################
-# load in drifter data
+### load in drifter data
 
 hsm.all<-read.csv("data/UMR_drifter_raw.csv")
 hsm.all$dt<-as.POSIXct(hsm.all$dt, format="%m/%d/%Y %H:%M" , tz="America/Chicago")
@@ -112,9 +112,8 @@ hsn.all <- hsn.all %>%
   mutate(time = as.hms(strftime(dt, format="%H:%M:%S", tz="EST"))) %>%
   left_join(sunrise.n, by="date")
 
-# write.csv(hsm.all, "data/UMR_drifter_clean.csv)
-# write.csv(hsn.all, "data/NR_drifter_clean.csv)
-
+#write.csv(hsm.all %>% filter(type=="sub"), "data/UMR_drifter_clean.csv")
+#write.csv(hsn.all %>% filter (type=="sub"), "data/NR_drifter_clean.csv")
 
 #####################################################################
 # Calculate KD along river from drifter data
@@ -167,13 +166,14 @@ hsm.all_join <- hsm.all %>%
 
 
 #NR
-lm_roll2 <- rollify(~lm(.x ~ .y, na.action = na.exclude), window = 30, unlist = FALSE)
-rolling_mean2 <- rollify(~mean(.x, na.rm = TRUE), window = 30)
-roll_time2 <- rollify(~max(.x, na.rm = TRUE), window = 30)
+lm_roll2 <- rollify(~lm(.x ~ .y, na.action = na.exclude), window =60, unlist = FALSE)
+rolling_mean2 <- rollify(~mean(.x, na.rm = TRUE), window = 60)
+roll_time2 <- rollify(~max(.x, na.rm = TRUE), window = 60)
 
 data_neu <- hsn.all %>%
   filter(doy.name %in% c("9/25/2014.3B" ,"10/12/2015.3B", "4/10/2016.4A", "4/20/2016.3A",
-                         "3/10/2015.3B")) %>%
+                         "3/10/2015.3B"),
+         date != "2015-10-13") %>%
   filter(is.na(error_flag)) %>%
   mutate(lux_kd = ifelse(lux_tilt_rm < 13, NA, lux_tilt_rm)) %>%
   mutate(depth_kd = ifelse(depth.top < 0.1, NA, depth.top)) %>%
@@ -247,10 +247,8 @@ data_neu_kd <- data_neu %>%
   unite(temp, term, variable) %>%
   spread(temp, value) 
 
-#write.csv()
-
 #################################################
-## join to data, then to full data, goruped_join by dt, doy.name
+# join to data, then to full data, goruped_join by dt, doy.name
 
 #NR
 hsn_stats_data <- hsn.all_join %>% 
@@ -268,7 +266,6 @@ hsn_fits2 <- hsn_stats_data %>%
   group_by(date) %>%
   do(glance(lm((slope_estimate_plot) ~ roll_depth, data=.))) %>%
   left_join(hsn_fits1, by="date")
-
 
 #UMR
 hsm_stats_data <- hsm.all_join %>% 
@@ -426,6 +423,129 @@ hs_neu_sum_join <- hs_neu_cum %>%
   distinct(date, .keep_all = T) %>%
   left_join(hs_neu_sum, by="date")
 
+#######################################################
+### Sunfleck analysis for UMR
+sunfleck_hsm <- hsm.all %>%
+  filter(type == "sub", doy.name %in% c("168.4B" ,"175.4B", "175.3A", "180.3B","180.3A",
+                                        "180.4B", "181.3A","181.3B","187.3A","187.3B","193.3A","193.3B","196.3A","196.3B" )) %>%
+  mutate(lux_tilt_rm = ifelse(is.na(error_flag), lux_tilt_rm, NA)) %>%
+  group_by(doy.name) %>%
+  do(pad(., by="dt")) %>%
+  mutate(lux_tilt_rm = na.approx(lux_tilt_rm, x=dt, na.rm=F, maxgap=5)) %>%
+  mutate(diff.time= as.numeric(c(0, difftime(tail(dt, -1), head(dt, -1),units=c("mins"))))) %>%
+  mutate(sunfleck = ifelse(lux_tilt_rm >= 500, 1, NA)) %>%
+  mutate(sunfleck = ifelse(is.na(lux_tilt_rm), NA, sunfleck)) %>%
+  mutate(darkfleck = ifelse(lux_tilt_rm < 500, 1, NA)) %>%
+  mutate(darkfleck = ifelse(is.na(lux_tilt_rm), NA, darkfleck)) %>%
+  mutate(ID = rleid(!is.na(sunfleck))) %>%
+  mutate(sunfleck_ID = ifelse(!is.na(sunfleck), ID, NA)) %>%
+  mutate(darkfleck_ID = ifelse(!is.na(darkfleck), ID, NA)) %>%
+  filter(!is.na(sunfleck_ID) | !is.na(darkfleck_ID)) %>%
+  ungroup() %>%
+  group_by(doy.name, date, sunfleck_ID) %>%
+  summarise(sampling_interval = median(diff.time, na.rm=T), sunfleck_duration = n() * sampling_interval, sunfleck_peak = max(lux_tilt_rm,na.rm=T), 
+            sunfleck_total_lux = sum(lux_tilt_rm, na.rm=T) * sampling_interval) %>%
+  filter(!is.na(sunfleck_ID))
+
+### inter-arrival time
+darkfleck_hsm <- hsm.all %>%
+  filter(type == "sub", doy.name %in% c("168.4B" ,"175.4B", "175.3A", "180.3B","180.3A",
+                                        "180.4B", "181.3A","181.3B","187.3A","187.3B","193.3A","193.3B","196.3A","196.3B" )) %>%
+  mutate(lux_tilt_rm = ifelse(is.na(error_flag), lux_tilt_rm, NA)) %>%
+  group_by(doy.name) %>%
+  do(pad(., by="dt")) %>%
+  mutate(lux_tilt_rm = na.approx(lux_tilt_rm, x=dt, na.rm=F, maxgap=5)) %>%
+  mutate(diff.time= as.numeric(c(0, difftime(tail(dt, -1), head(dt, -1),units=c("mins"))))) %>%
+  mutate(sunfleck = ifelse(lux_tilt_rm >= 500, 1, NA)) %>%
+  mutate(sunfleck = ifelse(is.na(lux_tilt_rm), NA, sunfleck)) %>%
+  mutate(darkfleck = ifelse(lux_tilt_rm < 500, 1, NA)) %>%
+  mutate(darkfleck = ifelse(is.na(lux_tilt_rm), NA, darkfleck)) %>%
+  mutate(ID = rleid(!is.na(sunfleck))) %>%
+  mutate(sunfleck_ID = ifelse(!is.na(sunfleck), ID, NA)) %>%
+  mutate(darkfleck_ID = ifelse(!is.na(darkfleck), ID, NA)) %>%
+  filter(!is.na(sunfleck_ID) | !is.na(darkfleck_ID)) %>%
+  ungroup() %>%
+  group_by(doy.name, date, darkfleck_ID) %>%
+  summarise(sampling_interval = median(diff.time, na.rm=T), darkfleck_duration = n() * sampling_interval, darkfleck_trough = min(lux_tilt_rm,na.rm=T), 
+            darkfleck_total_lux = sum(lux_tilt_rm, na.rm=T) * sampling_interval) %>%
+  filter(!is.na(darkfleck_ID))
+
+### Sunfleck analysis for NR
+sunfleck_hsn <- hsn.all %>%
+  filter(doy.name %in% c("9/25/2014.3B" ,"10/12/2015.3B", "4/10/2016.4A", "4/20/2016.3A",
+                         "3/10/2015.3B")) %>%
+  filter(time > as.hms("6:00:00") & time < as.hms("18:00:00")) %>%
+  mutate(lux_tilt_rm = ifelse(is.na(error_flag), lux_tilt_rm, NA)) %>%
+  group_by(date) %>%
+  do(pad(., by="dt")) %>%
+  mutate(lux_tilt_rm = na.approx(lux_tilt_rm, x=dt, na.rm=F, maxgap=5)) %>%
+  mutate(diff.time= as.numeric(c(0, difftime(tail(dt, -1), head(dt, -1),units=c("mins"))))) %>%
+  mutate(sunfleck = ifelse(lux_tilt_rm >= 500, 1, NA)) %>%
+  mutate(sunfleck = ifelse(is.na(lux_tilt_rm), NA, sunfleck)) %>%
+  mutate(darkfleck = ifelse(lux_tilt_rm < 500, 1, NA)) %>%
+  mutate(darkfleck = ifelse(is.na(lux_tilt_rm), NA, darkfleck)) %>%
+  mutate(ID = rleid(!is.na(sunfleck))) %>%
+  mutate(sunfleck_ID = ifelse(!is.na(sunfleck), ID, NA)) %>%
+  mutate(darkfleck_ID = ifelse(!is.na(darkfleck), ID, NA)) %>%
+  filter(!is.na(sunfleck_ID) | !is.na(darkfleck_ID)) %>%
+  ungroup() %>%
+  group_by(date, sunfleck_ID) %>%
+  summarise(sampling_interval = median(diff.time, na.rm=T), sunfleck_duration = n() * sampling_interval, sunfleck_peak = max(lux_tilt_rm,na.rm=T), 
+            sunfleck_total_lux = sum(lux_tilt_rm, na.rm=T) * sampling_interval) %>%
+  filter(!is.na(sunfleck_ID))
 
 
+### inter-arrival time
+darkfleck_hsn <- hsn.all %>%
+  filter(doy.name %in% c("9/25/2014.3B" ,"10/12/2015.3B", "4/10/2016.4A", "4/20/2016.3A",
+                         "3/10/2015.3B")) %>%
+  filter(time > as.hms("6:00:00") & time < as.hms("18:00:00")) %>%
+  mutate(lux_tilt_rm = ifelse(is.na(error_flag), lux_tilt_rm, NA)) %>%
+  group_by(date) %>%
+  do(pad(., by="dt")) %>%
+  mutate(lux_tilt_rm = na.approx(lux_tilt_rm, x=dt, na.rm=F, maxgap=5)) %>%
+  mutate(diff.time= as.numeric(c(0, difftime(tail(dt, -1), head(dt, -1),units=c("mins"))))) %>%
+  mutate(sunfleck = ifelse(lux_tilt_rm >= 500, 1, NA)) %>%
+  mutate(sunfleck = ifelse(is.na(lux_tilt_rm), NA, sunfleck)) %>%
+  mutate(darkfleck = ifelse(lux_tilt_rm < 500, 1, NA)) %>%
+  mutate(darkfleck = ifelse(is.na(lux_tilt_rm), NA, darkfleck)) %>%
+  mutate(ID = rleid(!is.na(sunfleck))) %>%
+  mutate(sunfleck_ID = ifelse(!is.na(sunfleck), ID, NA)) %>%
+  mutate(darkfleck_ID = ifelse(!is.na(darkfleck), ID, NA)) %>%
+  filter(!is.na(sunfleck_ID) | !is.na(darkfleck_ID)) %>%
+  ungroup() %>%
+  group_by(date, darkfleck_ID) %>%
+  summarise(sampling_interval = median(diff.time, na.rm=T), darkfleck_duration = n() * sampling_interval, darkfleck_trough = min(lux_tilt_rm,na.rm=T), 
+            darkfleck_total_lux = sum(lux_tilt_rm, na.rm=T) * sampling_interval) %>%
+  filter(!is.na(darkfleck_ID))
+
+hist((darkfleck_hsn$darkfleck_duration), breaks = 40)
+
+############################################
+### estimate mean interarrival time and mean duration of sunflecks
+
+fit_inter_miss <- fitdist(darkfleck_hsm$darkfleck_duration, "exp", method="mle") 
+plot(fit_inter_miss)
+summary(fit_inter_miss)
+## interarrival time
+1/coef(fit_inter_miss)    ## 12 minutes
+
+fit_dur_miss <- fitdist(sunfleck_hsm$sunfleck_duration, "exp", method="mle") 
+plot(fit_dur_miss)
+summary(fit_dur_miss)
+## interarrival time
+1/coef(fit_dur_miss)    # 14 minutes duration of 
+
+###, method="mle"
+fit_inter_neu <- fitdist(darkfleck_hsn$darkfleck_duration, "exp", method="mle") 
+plot(fit_inter_neu)
+summary(fit_inter_neu)
+## interarrival time
+1/coef(fit_inter_neu)    ## 6.8 minutes inter
+
+fit_dur_neu <- fitdist(sunfleck_hsn$sunfleck_duration, "exp", method="mle") 
+plot(fit_dur_neu)
+summary(fit_dur_neu)
+## interarrival time
+1/coef(fit_dur_neu)  # 1.6 minutes duration of 
 
