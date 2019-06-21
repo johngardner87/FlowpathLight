@@ -7,10 +7,10 @@ This data set and code is associated with Gardner et al. 2019 in press Limnology
 In the data folder there are raw and cleaned drifter datasets from the Upper Mississippi River (UMR) in Wisconsin and Neuse River (NR) in North Carolina.
 
 The cleaned data includes the following columns...
-*dt=date time (UMR in CDT, NR in EST);
 
+dt=date time (UMR in CDT, NR in EST);
 
-*temp=temperature in C;
+temp=temperature in C;
 accelerometer data=
 ax,
 ay,
