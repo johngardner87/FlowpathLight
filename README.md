@@ -8,8 +8,8 @@ In the data folder there are raw and cleaned drifter datasets from the Upper Mis
 
 The cleaned data includes the following columns...
 
-dt=date time (UMR in CDT, NR in EST);
-temp=temperature in C;
+* dt=date time (UMR in CDT, NR in EST);
+* temp=temperature in C;
 accelerometer data=
 ax,
 ay,
